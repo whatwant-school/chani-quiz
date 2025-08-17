@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>사진 회상 퀴즈 (Dementia-friendly)</title>
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <!-- Leaflet (map) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- EXIF reader -->
+  <script src="https://unpkg.com/exifr/dist/lite.umd.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root{
+      --bg:#0b0f14; --panel:#10161d; --muted:#8aa0b6; --text:#ebf2f9; --accent:#4aa3ff; --good:#18c37d; --bad:#ff5d5d; --card:#0f141b; --btn:#19212b;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:linear-gradient(180deg,#0a0e13,#0c1218);color:var(--text);font-family:Pretendard,Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+    .app{height:100vh;display:grid;grid-template-rows:70px 1fr 70px;gap:12px;padding:16px}
+    header,footer{display:flex;align-items:center;justify-content:space-between;background:rgba(16,22,29,.8);backdrop-filter:saturate(140%) blur(6px);border:1px solid #1e2732;border-radius:16px;padding:10px 14px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{width:36px;height:36px;border-radius:9px;background:linear-gradient(135deg,var(--accent),#00daa3);display:grid;place-items:center;font-weight:700;color:#081018}
+    .brand h1{font-size:18px;margin:0}
+    .stats{display:flex;gap:16px;font-size:13px;color:var(--muted)}
+    .stats .dot{display:inline-block;width:8px;height:8px;border-radius:999px;margin-right:6px}
+    .main{display:grid;grid-template-columns:1.2fr 1fr;gap:12px;min-height:0}
+    .panel{background:var(--panel);border:1px solid #1b2430;border-radius:18px;padding:12px;display:flex;flex-direction:column;min-height:0}
+    .imageArea{position:relative;display:grid;place-items:center;height:100%;min-height:0}
+    .imageFrame{width:100%;height:100%;border-radius:12px;background:#0b1117;border:1px dashed #223042;display:grid;place-items:center;overflow:hidden}
+    .imageFrame img{max-width:100%;max-height:100%;object-fit:contain}
+    .placeholder{color:#415266;font-size:14px}
+    .quizArea{display:grid;grid-template-rows:auto 1fr;gap:8px;min-height:0}
+    .card{background:var(--card);border:1px solid #202a36;border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px;min-height:0}
+    .card h2{margin:0;font-size:18px}
+    .choices{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .btn{background:var(--btn);border:1px solid #243244;color:var(--text);padding:12px 14px;border-radius:12px;cursor:pointer;font-weight:600;transition:transform .05s ease, border-color .2s ease;user-select:none;text-align:center}
+    .btn:hover{border-color:#2f4258}
+    .btn:active{transform:translateY(1px)}
+    .btn.primary{background:linear-gradient(180deg,#0f58a3,#0d4580);border-color:#19508d}
+    .btn.good{border-color:#1c7d57}
+    .btn.bad{border-color:#7d2a2a}
+    .toolbar{display:flex;gap:8px}
+    .muted{color:var(--muted)}
+    .pill{display:inline-flex;align-items:center;gap:8px;border:1px solid #273445;background:#121925;padding:6px 10px;border-radius:999px;font-size:12px}
+    .kpi{display:flex;flex-direction:column;gap:2px}
+    .kpi label{font-size:11px;color:var(--muted)}
+    .kpi strong{font-size:16px}
+    #map{width:100%;height:280px;border-radius:12px;border:1px solid #253241}
+    .progress{height:8px;background:#0e1620;border:1px solid #1e2834;border-radius:999px;overflow:hidden}
+    .progress > div{height:100%;width:0;background:linear-gradient(90deg,#3d7bd6,#2ec8a6)}
+    .row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    footer .left, footer .right{display:flex;align-items:center;gap:8px}
+    .small{font-size:12px}
+    .hidden{display:none !important}
+    .center{display:grid;place-items:center}
+    .chartWrap{height:240px}
+    .notice{font-size:12px;color:#a9bed4}
+    @media (max-width: 1100px){.main{grid-template-columns:1fr;grid-auto-rows:1fr}}
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <header>
+      <div class="brand">
+        <div class="logo">Q</div>
+        <div>
+          <h1>사진 회상 퀴즈</h1>
+          <div class="muted small">로컬 사진으로 기억을 깨우는 안전한 연습</div>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="pill"><span class="dot" style="background:var(--accent)"></span><span id="folderName">폴더 미선택</span></div>
+        <div class="pill"><span class="dot" style="background:var(--good)"></span> <span>사진</span> <strong id="photoCount">0</strong></div>
+        <div class="pill"><span class="dot" style="background:#c59dff"></span> <span>진행</span> <strong id="progressLabel">0 / 10</strong></div>
+      </div>
+      <div class="toolbar">
+        <button class="btn" id="pickBtn">폴더 선택</button>
+        <button class="btn" id="resumeBtn" disabled>재개</button>
+        <button class="btn primary" id="startBtn" disabled>새 세션 시작</button>
+        <button class="btn" id="exportBtn" title="대체 모드에서 히스토리 내보내기">기록 내보내기</button>
+      </div>
+      <!-- 대체 방식: 보안 정책으로 showDirectoryPicker가 막힌 경우 사용 -->
+      <input type="file" id="dirInput" webkitdirectory multiple class="hidden">
+    </header>
+
+    <div class="main">
+      <section class="panel imageArea">
+        <div class="imageFrame" id="imageFrame">
+          <div class="placeholder" id="imagePlaceholder">왼쪽에 사진이 표시됩니다</div>
+          <img id="mainImage" alt="quiz" class="hidden"/>
+        </div>
+      </section>
+      <section class="panel quizArea">
+        <div class="card">
+          <div class="row"><h2 id="questionTitle">세션을 시작해 주세요</h2><div class="kpi"><label>정답률</label><strong id="accLabel">–</strong></div></div>
+          <div class="progress"><div id="progressBar"></div></div>
+          <div id="questionBody" class="center muted">폴더를 선택한 뒤 새 세션을 시작하세요.</div>
+        </div>
+        <div class="card hidden" id="mapCard">
+          <div id="map" class="hidden"></div>
+          <div id="mapTip" class="notice hidden">지도를 클릭해 위치를 선택하거나, 아래 보기 중에서 고르세요.</div>
+        </div>
+        <div class="card" id="choicesCard">
+          <div class="choices" id="choices"></div>
+        </div>
+        <div class="card hidden" id="summaryCard">
+          <h2>결과 요약</h2>
+          <div class="row"><div class="kpi"><label>점수</label><strong id="scoreLabel">0 / 10</strong></div><div class="kpi"><label>소요시간</label><strong id="timeLabel">–</strong></div></div>
+          <div class="chartWrap"><canvas id="historyChart"></canvas></div>
+          <div class="notice" id="historyNote">세션 기록은 선택하신 폴더의 <code>dementia_quiz_history.jsonl</code> 파일로 저장됩니다.</div>
+        </div>
+      </section>
+    </div>
+
+    <footer>
+      <div class="left small muted">모든 처리는 로컬에서 수행됩니다. 지도 타일은 OpenStreetMap 서버에서 로드됩니다.</div>
+      <div class="right small">
+        <span id="statusText">대기 중</span>
+      </div>
+    </footer>
+  </div>
+
+<script>
+(function(){
+  'use strict';
+  // ---------- DOM helpers ----------
+  const $ = s => document.querySelector(s);
+  const $$ = s => Array.from(document.querySelectorAll(s));
+
+  // ---------- State ----------
+  let dirHandle = null;              // DirectoryHandle (picker 모드 전용)
+  let imageHandles = [];             // { handle:{getFile:()=>File}, name, path }
+  let imagesMeta = [];               // { path, url, meta, width, height }
+  let currentQ = null;
+  let session = null;                // { start, questions:[...], answers:[], idx }
+  let chart = null;
+
+  const SESSION_LEN = 10;
+  const HISTORY_FILENAME = 'dementia_quiz_history.jsonl';
+  const LOCAL_KEY = 'photo_quiz_state_v2';
+  const LOCAL_HISTORY = 'photo_quiz_history_v2'; // 대체 모드용
+
+  // ---------- UI refs ----------
+  const pickBtn = $('#pickBtn');
+  const startBtn = $('#startBtn');
+  const resumeBtn = $('#resumeBtn');
+  const exportBtn = $('#exportBtn');
+  const folderName = $('#folderName');
+  const photoCount = $('#photoCount');
+  const progressLabel = $('#progressLabel');
+  const progressBar = $('#progressBar');
+  const accLabel = $('#accLabel');
+  const statusText = $('#statusText');
+  const imageEl = $('#mainImage');
+  const imagePlaceholder = $('#imagePlaceholder');
+  const questionTitle = $('#questionTitle');
+  const questionBody = $('#questionBody');
+  const choicesBox = $('#choices');
+  const mapCard = $('#mapCard');
+  const mapEl = $('#map');
+  const mapTip = $('#mapTip');
+  const summaryCard = $('#summaryCard');
+  const scoreLabel = $('#scoreLabel');
+  const timeLabel = $('#timeLabel');
+  const historyNote = $('#historyNote');
+  const dirInput = $('#dirInput');
+  let leafletMap = null;
+  let mapClickAnswer = null;
+
+  // ---------- Utilities ----------
+  function status(msg){ statusText.textContent = msg; }
+  const exts = ['.jpg','.jpeg','.png','.heic','.webp'];
+  const isImage = name => exts.some(e => name.toLowerCase().endsWith(e));
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]];} return arr; }
+  function formatDuration(ms){ const s=Math.round(ms/1000); const m=Math.floor(s/60); const rs=s%60; return `${m}분 ${rs}초`; }
+  function haversine(lat1, lon1, lat2, lon2){ const R=6371, toRad=d=>d*Math.PI/180; const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1); const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(a)); }
+
+  // ---------- Device name mapping ----------
+  function friendlyCameraName(make, model){
+    const m=(model||'').trim(); const mk=(make||'').toLowerCase();
+    const S={
+      'SM-F936':'갤럭시 폴드4','SM-F946':'갤럭시 폴드5','SM-F926':'갤럭시 폴드3',
+      'SM-F721':'갤럭시 플립4','SM-F731':'갤럭시 플립5','SM-F711':'갤럭시 플립3',
+      'SM-S901':'갤럭시 S22','SM-S906':'갤럭시 S22+','SM-S908':'갤럭시 S22 울트라',
+      'SM-S911':'갤럭시 S23','SM-S916':'갤럭시 S23+','SM-S918':'갤럭시 S23 울트라',
+      'SM-S921':'갤럭시 S24','SM-S926':'갤럭시 S24+','SM-S928':'갤럭시 S24 울트라'
+    };
+    for(const k of Object.keys(S)) if(m.includes(k)) return S[k];
+    if(mk.includes('apple') || m.startsWith('iPhone')) return m.replaceAll(',', ' ');
+    if(mk.includes('samsung')) return `갤럭시 ${m}`;
+    if(mk.includes('sony')) return `소니 ${m}`;
+    if(mk.includes('canon')) return `캐논 ${m}`;
+    if(mk.includes('nikon')) return `니콘 ${m}`;
+    if(mk.includes('fujifilm')) return `후지필름 ${m}`;
+    return m || '알 수 없음';
+  }
+
+  // ---------- Korea regions (approx bounds + centroid) ----------
+  const KR_REGIONS=[
+    {key:'서울특별시', short:'서울', bounds:[[37.40,126.76],[37.70,127.18]], center:[37.5665,126.9780]},
+    {key:'부산광역시', short:'부산', bounds:[[35.04,128.86],[35.35,129.29]], center:[35.1796,129.0756]},
+    {key:'인천광역시', short:'인천', bounds:[[37.29,126.23],[37.70,126.78]], center:[37.4563,126.7052]},
+    {key:'대구광역시', short:'대구', bounds:[[35.70,128.40],[36.00,128.80]], center:[35.8714,128.6014]},
+    {key:'대전광역시', short:'대전', bounds:[[36.22,127.27],[36.51,127.57]], center:[36.3504,127.3845]},
+    {key:'광주광역시', short:'광주', bounds:[[35.02,126.65],[35.30,126.99]], center:[35.1595,126.8526]},
+    {key:'울산광역시', short:'울산', bounds:[[35.35,129.08],[35.75,129.55]], center:[35.5384,129.3114]},
+    {key:'세종특별자치시', short:'세종', bounds:[[36.43,127.23],[36.67,127.45]], center:[36.4800,127.2890]},
+    {key:'경기도', short:'경기', bounds:[[36.98,126.38],[38.30,127.90]], center:[37.4138,127.5183]},
+    {key:'강원도', short:'강원', bounds:[[37.00,127.20],[38.60,129.30]], center:[37.8228,128.1555]},
+    {key:'충청북도', short:'충북', bounds:[[36.50,127.30],[37.35,128.40]], center:[36.8,127.7]},
+    {key:'충청남도', short:'충남', bounds:[[36.10,126.10],[36.99,127.40]], center:[36.5184,126.8]},
+    {key:'전라북도', short:'전북', bounds:[[35.40,126.50],[36.00,127.60]], center:[35.7167,127.1442]},
+    {key:'전라남도', short:'전남', bounds:[[34.00,126.10],[35.10,127.50]], center:[34.8679,126.9910]},
+    {key:'경상북도', short:'경북', bounds:[[35.70,128.00],[37.10,130.90]], center:[36.4919,128.8889]},
+    {key:'경상남도', short:'경남', bounds:[[34.60,127.50],[35.80,129.40]], center:[35.2383,128.6924]},
+    {key:'제주특별자치도', short:'제주', bounds:[[33.10,126.10],[33.60,126.98]], center:[33.4996,126.5312]},
+  ];
+  const KR_BOUNDS=[[33.0,124.5],[38.7,132.2]];
+  function inKorea(lat, lon){ return lat>=KR_BOUNDS[0][0] && lat<=KR_BOUNDS[1][0] && lon>=KR_BOUNDS[0][1] && lon<=KR_BOUNDS[1][1]; }
+  function nearestKrRegion(lat, lon){ let best=null, bestD=1e9; for(const r of KR_REGIONS){ const d=haversine(lat,lon,r.center[0],r.center[1]); if(d<bestD){bestD=d; best=r;} } return best; }
+
+  // ---------- History helpers ----------
+  async function ensureHistoryFile(){ try{ const fh=await dirHandle.getFileHandle(HISTORY_FILENAME,{create:true}); return fh; }catch(e){ return null; } }
+  async function appendHistoryLine(obj){
+    if(!dirHandle){ // fallback to localStorage array
+      const arr = JSON.parse(localStorage.getItem(LOCAL_HISTORY)||'[]');
+      arr.push(obj); localStorage.setItem(LOCAL_HISTORY, JSON.stringify(arr));
+      return false; // not written to FS
+    }
+    try{
+      const fh=await ensureHistoryFile(); if(!fh) return false;
+      const file = await fh.getFile();
+      const writable = await fh.createWritable({ keepExistingData:true });
+      await writable.write({ type:'write', position:file.size, data: JSON.stringify(obj)+"\n" });
+      await writable.close();
+      return true;
+    }catch(e){
+      // also keep local copy so 그래프는 갱신됨
+      const arr = JSON.parse(localStorage.getItem(LOCAL_HISTORY)||'[]');
+      arr.push(obj); localStorage.setItem(LOCAL_HISTORY, JSON.stringify(arr));
+      return false;
+    }
+  }
+  async function readHistoryAll(){
+    // Merge FS history (if available) + local fallback
+    const local = JSON.parse(localStorage.getItem(LOCAL_HISTORY)||'[]');
+    if(!dirHandle){ return local; }
+    try{
+      const fh = await dirHandle.getFileHandle(HISTORY_FILENAME,{ create:false });
+      const blob = await fh.getFile();
+      const text = await blob.text();
+      const fsArr = text.split(/\n+/).filter(Boolean).map(line=>{ try{return JSON.parse(line);}catch{return null; } }).filter(Boolean);
+      return fsArr; // prefer FS (authoritative)
+    }catch(e){ return local; }
+  }
+
+  // ---------- Image & EXIF ----------
+  async function extractMeta(handle){
+    const file = await handle.getFile();
+    const url = URL.createObjectURL(file);
+    let meta={};
+    try{ meta = await exifr.parse(file, {tiff:true, exif:true, gps:true, icc:false}); }
+    catch(e){ meta = {}; }
+    const size = await new Promise((res)=>{ const img=new Image(); img.onload=()=>res({w:img.naturalWidth,h:img.naturalHeight}); img.onerror=()=>res({w:null,h:null}); img.src=url; });
+    return { url, file, meta, width:size.w, height:size.h };
+  }
+
+  // ---------- Question generators ----------
+  function genYearQ(img){ const dt = img.meta?.DateTimeOriginal || img.meta?.CreateDate || img.meta?.ModifyDate; if(!dt) return null; const year=(typeof dt==='string')?parseInt(dt.slice(0,4)):(dt.getFullYear?.()||null); if(!year) return null; const pool=new Set([year]); while(pool.size<4){ pool.add(year + (Math.floor(Math.random()*7)-3)); } const options=shuffle([...pool]).map(y=>`${y}년`); return { type:'year', title:'이 사진은 언제 찍었을까요? (연도)', options, correct: options.indexOf(`${year}년`) }; }
+  function genMonthQ(img){ const dt = img.meta?.DateTimeOriginal || img.meta?.CreateDate || img.meta?.ModifyDate; if(!dt) return null; const m=(typeof dt==='string')? parseInt((dt.split(':')[1]||dt.split('-')[1]||'').replace(/[^0-9]/g,'')) : ((img.meta?.getMonth? img.meta.getMonth(): (dt.getMonth?.()||0))+1); if(!m||m<1||m>12) return null; const corr=`${m}월`; const pool=new Set([corr]); while(pool.size<4){ pool.add(`${((m+Math.floor(Math.random()*10))%12)||12}월`); } const options=shuffle([...pool]); return { type:'month', title:'이 사진은 언제 찍었을까요? (월)', options, correct: options.indexOf(corr) }; }
+  function genDeviceQ(img){ const make=img.meta?.Make; const model=img.meta?.Model; if(!make && !model) return null; const friendly=friendlyCameraName(make,model); const distractors=['갤럭시 S23','아이폰 14 Pro','갤럭시 플립4','아이폰 13','캐논 EOS 80D','니콘 D750','소니 A7M3']; const options=shuffle([friendly, ...shuffle(distractors).slice(0,3)]); return { type:'device', title:'어떤 기기로 찍었을까요?', options, correct: options.indexOf(friendly) }; }
+  function genOrientQ(img){ if(!img.width||!img.height) return null; const isLandscape=img.width>=img.height; const options=['가로 사진','세로 사진']; return { type:'orientation', title:'이 사진의 방향은?', options, correct: isLandscape?0:1 }; }
+  function genKRRegionQ(img){ const lat=img.meta?.latitude||img.meta?.GPSLatitude; const lon=img.meta?.longitude||img.meta?.GPSLongitude; if(typeof lat!=='number'||typeof lon!=='number') return null; if(!inKorea(lat,lon)) return null; const target=nearestKrRegion(lat,lon); const others=shuffle(KR_REGIONS.filter(r=>r.short!==target.short)).slice(0,3); const options=shuffle([target.short, ...others.map(o=>o.short)]); return { type:'kr-region', title:'이 사진은 어느 지역일까요? (시·도)', options, correct: options.indexOf(target.short), map:{ kind:'kr', target } }; }
+  function genMapClickQ(img){ const lat=img.meta?.latitude||img.meta?.GPSLatitude; const lon=img.meta?.longitude||img.meta?.GPSLongitude; if(typeof lat!=='number'||typeof lon!=='number') return null; if(inKorea(lat,lon)) return null; return { type:'map-click', title:'이 사진의 위치를 지도로 찍어보세요 (대략적)', options:['지도에서 선택'], correct:0, map:{ kind:'world', lat, lon, tolKm:30 } }; }
+  function genMemoryQ(){ const options=['또렷이 기억나요','어느 정도 기억나요','거의 기억 안 나요']; return { type:'memory', title:'이 사진에 얽힌 이야기가 기억나시나요?', options, correct:null }; }
+  const generators=[genYearQ, genMonthQ, genDeviceQ, genKRRegionQ, genMapClickQ, genOrientQ];
+
+  // ---------- Session build ----------
+  async function buildSession(){
+    status('사진을 분석하고 있습니다…');
+    imagesMeta=[];
+    let count=0;
+    for(const item of imageHandles){
+      const m = await extractMeta(item.handle);
+      imagesMeta.push({ path:item.path, url:m.url, meta:m.meta||{}, width:m.width, height:m.height });
+      count++; if(count%10===0) status(`분석 중… (${count}장)`);
+      if(imagesMeta.length>=80){ /* 충분히 파싱했으면 속도 위해 중단 가능 */ }
+    }
+    photoCount.textContent = String(imagesMeta.length);
+
+    const pool=[];
+    for(const img of shuffle(imagesMeta.slice())){
+      for(const g of generators){ const q=g(img); if(q){ pool.push({ ...q, img }); } }
+    }
+
+    const objTypes=['year','month','device','kr-region','map-click','orientation'];
+    const objectives=pool.filter(q=>objTypes.includes(q.type));
+    const byType=Object.fromEntries(objTypes.map(t=>[t, shuffle(objectives.filter(q=>q.type===t))]));
+
+    const selected=[]; const imgUse=new Map();
+    const take=(arr,cap)=>{ for(const q of arr){ const used=imgUse.get(q.img.path)||0; if(used<cap){ selected.push(q); imgUse.set(q.img.path,used+1); arr.splice(arr.indexOf(q),1); return true; } } return false; };
+
+    let cap=1; while(selected.length<8){ let progressed=false; for(const t of objTypes){ progressed = take(byType[t],cap) || progressed; if(selected.length>=8) break; } if(!progressed){ if(cap>=2) break; cap++; } }
+
+    const memCandidates = shuffle(imagesMeta.filter(img=>!imgUse.has(img.path))).slice(0,2).map(img=>({ ...genMemoryQ(), img }));
+    for(const q of memCandidates){ if(selected.length<SESSION_LEN) selected.push(q); }
+
+    const leftover = objectives.filter(q=>!selected.includes(q)).sort((a,b)=>(imgUse.get(a.img.path)||0)-(imgUse.get(b.img.path)||0));
+    while(selected.length<SESSION_LEN && leftover.length){ selected.push(leftover.shift()); }
+
+    shuffle(selected);
+    return { start:Date.now(), idx:0, questions:selected, answers:[] };
+  }
+
+  // ---------- Rendering ----------
+  function setImage(img){ if(!img){ imageEl.classList.add('hidden'); imagePlaceholder.classList.remove('hidden'); return; } imageEl.src=img.url; imageEl.classList.remove('hidden'); imagePlaceholder.classList.add('hidden'); }
+  function clearChoices(){ choicesBox.innerHTML=''; mapCard.classList.add('hidden'); mapEl.classList.add('hidden'); mapTip.classList.add('hidden'); mapClickAnswer=null; }
+  function renderQuestion(){
+    const q=session.questions[session.idx]; currentQ=q; setImage(q.img); questionTitle.textContent=q.title; clearChoices();
+    progressLabel.textContent=`${session.idx+1} / ${SESSION_LEN}`; progressBar.style.width=`${((session.idx)/SESSION_LEN)*100}%`;
+    if(q.type==='map-click'||q.type==='kr-region'){ mapCard.classList.remove('hidden'); mapEl.classList.remove('hidden'); mapTip.classList.remove('hidden'); queueMicrotask(()=>initMap(q)); }
+    q.options.forEach((opt,i)=>{ const btn=document.createElement('button'); btn.className='btn'; btn.textContent=opt; btn.addEventListener('click',()=>answer(i)); choicesBox.appendChild(btn); });
+    questionBody.innerHTML='';
+  }
+  function renderSummary(){
+    const corrects=session.answers.filter(a=>a.correct===true).length; scoreLabel.textContent=`${corrects} / ${SESSION_LEN}`; const spent=Date.now()-session.start; timeLabel.textContent=formatDuration(spent);
+    const acc=Math.round(corrects/SESSION_LEN*100); accLabel.textContent=`${acc}%`; progressBar.style.width='100%'; summaryCard.classList.remove('hidden');
+  }
+
+  // ---------- Map ----------
+  function initMap(q){
+    if(!leafletMap){ leafletMap=L.map('map',{zoomControl:true, attributionControl:false}); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(leafletMap); }
+    leafletMap.eachLayer(l=>{ if(l instanceof L.Marker||l instanceof L.Circle||l instanceof L.Rectangle) leafletMap.removeLayer(l); });
+
+    if(q.type==='kr-region' && q.map?.target){
+      const b=q.map.target.bounds; const rect=L.rectangle([[b[0][0],b[0][1]],[b[1][0],b[1][1]]],{color:'#4aa3ff',weight:1,fillOpacity:0.05}); rect.addTo(leafletMap); leafletMap.fitBounds(rect.getBounds(),{padding:[20,20]});
+      leafletMap.off('click'); leafletMap.on('click',(e)=>{ const optionsTexts=Array.from(choicesBox.children).map(b=>b.textContent); let best=null,bestD=1e9; for(const name of optionsTexts){ const r=KR_REGIONS.find(rr=>rr.short===name); if(!r) continue; const d=haversine(e.latlng.lat,e.latlng.lng,r.center[0],r.center[1]); if(d<bestD){bestD=d; best=name;} } if(best){ const idx=optionsTexts.indexOf(best); mapClickAnswer=idx; flashPick(idx); } });
+    } else if(q.type==='map-click' && q.map){
+      const {lat,lon,tolKm}=q.map; leafletMap.setView([lat,lon],9); const target=L.circle([lat,lon],{radius:tolKm*1000,color:'#18c37d',weight:1,fillOpacity:0.05}); target.addTo(leafletMap); leafletMap.off('click'); leafletMap.on('click',(e)=>{ mapClickAnswer=e.latlng; leafletMap.eachLayer(l=>{ if(l instanceof L.Marker) leafletMap.removeLayer(l); }); L.marker(e.latlng).addTo(leafletMap); });
+    }
+  }
+  function flashPick(idx){ $$('#choices .btn').forEach((b,i)=>{ b.style.outline=(i===idx)?'2px solid var(--accent)':'none'; }); }
+
+  // ---------- Answering ----------
+  function answer(index){
+    const q=currentQ; let correct=null;
+    if(q.type==='map-click' && mapClickAnswer){ const d=haversine(mapClickAnswer.lat,mapClickAnswer.lng,q.map.lat,q.map.lon); correct=d<=q.map.tolKm; }
+    else if(q.type==='kr-region'){ if(mapClickAnswer!==null && typeof mapClickAnswer==='number') index=mapClickAnswer; correct=(index===q.correct); }
+    else if(q.type==='memory'){ correct=null; }
+    else{ correct=(index===q.correct); }
+
+    const btns=$$('#choices .btn'); btns.forEach((b,i)=>{ if(q.correct===null){/*no-op*/} else if(i===q.correct) b.classList.add('good'); else if(i===index) b.classList.add('bad'); });
+
+    session.answers.push({ type:q.type, index, correct, t:Date.now() });
+    const solved=session.answers.filter(a=>a.correct!==null); if(solved.length){ const acc=Math.round(solved.filter(a=>a.correct).length/solved.length*100); accLabel.textContent=`${acc}%`; }
+
+    setTimeout(()=>{ if(session.idx<SESSION_LEN-1){ session.idx++; persistState(); renderQuestion(); } else { finishSession(); } }, 350);
+  }
+
+  // ---------- Session lifecycle ----------
+  async function startSession(){ summaryCard.classList.add('hidden'); status('세션을 준비합니다…'); session=await buildSession(); status('문제를 시작합니다'); progressBar.style.width='0%'; progressLabel.textContent=`0 / ${SESSION_LEN}`; renderQuestion(); persistState(); }
+  async function finishSession(){
+    progressLabel.textContent=`${SESSION_LEN} / ${SESSION_LEN}`; renderSummary();
+    const payload={ ts:new Date().toISOString(), score: session.answers.filter(a=>a.correct===true).length, total:SESSION_LEN, durationMs:Date.now()-session.start, types: session.answers.reduce((acc,a)=>{acc[a.type]=(acc[a.type]||0)+1; return acc;},{}) };
+    const wrote = await appendHistoryLine(payload);
+    status(wrote? '기록 저장 완료':'기록 저장(대체 저장소)');
+    await buildHistoryChart();
+    clearState();
+    // 안내 문구 업데이트
+    historyNote.innerHTML = wrote ? '세션 기록은 선택하신 폴더의 <code>dementia_quiz_history.jsonl</code> 파일에 저장되었습니다.' : '파일 시스템 권한이 없어 로컬 저장소에 기록되었습니다. 우측 상단의 <b>기록 내보내기</b> 버튼으로 저장할 수 있습니다.';
+  }
+
+  // ---------- Persistence (resume) ----------
+  function persistState(){ if(!dirHandle||!session) return; const data={ ts:Date.now(), idx:session.idx, dirName:folderName.textContent, images:imagesMeta.map(m=>({path:m.path})), questions:session.questions.map(q=>({type:q.type,imgPath:q.img.path,options:q.options,correct:q.correct,map:q.map||null})), answers:session.answers }; localStorage.setItem(LOCAL_KEY, JSON.stringify(data)); resumeBtn.disabled=false; }
+  function clearState(){ localStorage.removeItem(LOCAL_KEY); resumeBtn.disabled=true; }
+  async function tryResume(){ const raw=localStorage.getItem(LOCAL_KEY); if(!raw){ alert('재개할 세션이 없습니다.'); return; } const saved=JSON.parse(raw); if(!dirHandle){ await pickFolder(); if(!dirHandle){ alert('같은 폴더를 선택해야 재개할 수 있습니다.'); return; } } const mapByPath=new Map(); for await(const item of walkDir(dirHandle)) mapByPath.set(item.path,item); const missing=saved.images.filter(i=>!mapByPath.has(i.path)); if(missing.length){ alert('일부 파일을 찾지 못했습니다. 새 세션으로 시작합니다.'); await startSession(); return; } imagesMeta=[]; for(const im of saved.images){ const it=mapByPath.get(im.path); const m=await extractMeta(it.handle); imagesMeta.push({ path:it.path, url:m.url, meta:m.meta||{}, width:m.width, height:m.height }); } session={ start:Date.now(), idx: clamp(saved.idx,0,SESSION_LEN-1), questions:[], answers:saved.answers||[] }; const imgByPath=new Map(imagesMeta.map(m=>[m.path,m])); session.questions=saved.questions.map(q=>({ ...q, img: imgByPath.get(q.imgPath) })); status('세션을 재개합니다'); renderQuestion(); }
+
+  // ---------- History chart ----------
+  async function buildHistoryChart(){
+    const history=await readHistoryAll(); const ctx=document.getElementById('historyChart'); if(chart) chart.destroy();
+    const labels = history.map(h=>{ const d=new Date(h.ts); return d.toLocaleString('ko-KR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); });
+    const ys = history.map(h=> Math.round((h.score/h.total)*100) );
+    chart = new Chart(ctx,{ type:'line', data:{ labels, datasets:[{ label:'정답률 %', data:ys, tension:.25 }] }, options:{ responsive:true, maintainAspectRatio:false, scales:{ y:{ suggestedMin:0, suggestedMax:100 } } } });
+  }
+
+  // ---------- Folder picking & scan ----------
+  async function* walkDir(handle, prefix=''){ for await (const [name,entry] of handle.entries()){ const path=prefix?`${prefix}/${name}`:name; if(entry.kind==='file' && isImage(name)){ yield {handle:entry, name, path}; } else if(entry.kind==='directory'){ yield* walkDir(entry, path); } } }
+  async function pickFolder(){
+    // helper: file input fallback
+    const useFiles = (files)=>{ if(!files||!files.length){ status('폴더 선택 취소'); return; } imageHandles=[]; let root=''; for(const file of Array.from(files)){ const path=file.webkitRelativePath||file.name; if(!root) root= path.includes('/')? path.split('/')[0] : '선택됨'; if(isImage(file.name)){ imageHandles.push({ handle:{ getFile: async()=>file }, name:file.name, path }); } } dirHandle=null; folderName.textContent=root; photoCount.textContent=String(imageHandles.length); startBtn.disabled=imageHandles.length===0; resumeBtn.disabled= true; status('폴더 스캔 완료(대체 방식)'); };
+
+    try{
+      if('showDirectoryPicker' in window){
+        dirHandle = await window.showDirectoryPicker({ mode:'readwrite' });
+        folderName.textContent = '…'; imageHandles=[]; let n=0; for await(const item of walkDir(dirHandle)){ imageHandles.push(item); n++; if(n%50===0) status(`스캔 중… (${n})`); }
+        folderName.textContent = dirHandle.name || '선택됨'; photoCount.textContent=String(imageHandles.length); startBtn.disabled=imageHandles.length===0; status('폴더 스캔 완료'); resumeBtn.disabled = !localStorage.getItem(LOCAL_KEY);
+      } else {
+        status('보안 정책으로 기본 선택이 제한되어 대체 선택을 사용합니다'); dirInput.value=''; dirInput.onchange=(e)=>useFiles(e.target.files); dirInput.click();
+      }
+    }catch(e){
+      console.warn(e); status('폴더 선택이 차단되어 대체 선택을 사용합니다'); dirInput.value=''; dirInput.onchange=(e)=>useFiles(e.target.files); dirInput.click();
+    }
+  }
+
+  // ---------- Wire events ----------
+  pickBtn.addEventListener('click', pickFolder);
+  startBtn.addEventListener('click', startSession);
+  resumeBtn.addEventListener('click', tryResume);
+  exportBtn.addEventListener('click', ()=>{
+    const arr = JSON.parse(localStorage.getItem(LOCAL_HISTORY)||'[]');
+    if(!arr.length){ alert('내보낼 기록이 없습니다.'); return; }
+    const blob = new Blob(arr.map(o=>JSON.stringify(o)+'\n'), {type:'text/plain'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=HISTORY_FILENAME; a.click();
+  });
+
+  // On load
+  window.addEventListener('load', ()=>{
+    if(!('showDirectoryPicker' in window)){
+      // Firefox/보안정책 등. 자동으로 대체 방식 사용됨
+      console.log('showDirectoryPicker not available - fallback to input mode');
+    }
+    buildHistoryChart().catch(()=>{});
+  });
+})();
+</script>
+</body>
+</html>
